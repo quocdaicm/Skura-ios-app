@@ -194,9 +194,9 @@ jobs:
           # ---------------------------------------------------------------- main.js: no intro, audio on first touch
           M = 'src/main.js'
           sub(M, "const direct = params.size > 0 && !params.has('intro');", "const direct = !params.has('intro');")
-          sub(M, "sun.shadow.mapSize.set(2048, 2048);", "sun.shadow.mapSize.set(1024, 1024);")
+          sub(M, "sun.shadow.mapSize.set(2048, 2048);", "sun.shadow.mapSize.set(512, 512);")
           sub(M, "  await warmShaders(pipe, scene, camera);\n",
-                 "  ui.setStatus('Đang biên dịch hiệu ứng ánh sáng… lần đầu có thể mất 1–2 phút');\n  await new Promise((r) => setTimeout(r, 60));\n  await warmShaders(pipe, scene, camera);\n")
+                 "  ui.setStatus('Đang biên dịch hiệu ứng ánh sáng… lần đầu có thể mất 1–2 phút');\n  await new Promise((r) => setTimeout(r, 60));\n  try { await warmShaders(pipe, scene, camera); } catch (e) { console.error('[sf] shader warm-up failed: ' + (e && e.message || e)); }\n")
           sub(M, "  if (direct) {\n    ui.skip();\n  } else {", """  if (direct) {
               ui.skip();
               {
@@ -228,6 +228,8 @@ jobs:
           sub(P, "this.minScale = 0.5;", "this.minScale = 0.4;")
           sub(P, "this.reflScale = 0.5;", "this.reflScale = 0.3;")
           sub(P, "this.shadowEvery = 1;", "this.shadowEvery = 2;")
+          sub(P, "this.rtOpaque.samples = this.dpr >= 1.5 ? 2 : 4;", "this.rtOpaque.samples = 0; // no MSAA on phones: saves a lot of GPU memory (context was being lost)")
+          sub(P, "powerPreference: 'high-performance', ", "powerPreference: 'default', ")
           sub(P, "if (camY > 0.05) this.reflection.render(", "if (camY > 0.05 && (this.frame & 1) === 0) this.reflection.render(")
 
           # ---------------------------------------------------------------- grass: ~half the instances
@@ -250,24 +252,24 @@ jobs:
 
           # ---------------------------------------------------------------- Vietnamese: interface
           U = 'src/ui/ui.js'
-          sub(U, "[['春', 'Spring'], ['夏', 'Summer'], ['秋', 'Autumn'], ['冬', 'Winter']]", "[['春', 'Xuân'], ['夏', 'Hạ'], ['秋', 'Thu'], ['冬', 'Đông']]")
+          sub(U, "[['春', 'Spring'], ['夏', 'Summer'], ['秋', 'Autumn'], ['冬', 'Winter']]", "[['Xuân', 'Xuân'], ['Hạ', 'Hạ'], ['Thu', 'Thu'], ['Đông', 'Đông']]")
           sub(U, "['clear', '晴', 'Clear'], ['mist', '霧', 'Mist'], ['rain', '雨', 'Rain'], ['storm', '嵐', 'Storm'], ['snow', '雪', 'Snow']",
-                 "['clear', '晴', 'Trời quang'], ['mist', '霧', 'Sương mù'], ['rain', '雨', 'Mưa'], ['storm', '嵐', 'Bão'], ['snow', '雪', 'Tuyết']")
+                 "['clear', 'Quang', 'Trời quang'], ['mist', 'Sương', 'Sương mù'], ['rain', 'Mưa', 'Mưa'], ['storm', 'Bão', 'Bão'], ['snow', 'Tuyết', 'Tuyết']")
           sub(U, "['follow', '随', 'Follow'], ['seat', '座', 'Passenger'], ['cinema', '映', 'Cinematic']",
-                 "['follow', '随', 'Theo thuyền'], ['seat', '座', 'Ghế hành khách'], ['cinema', '映', 'Điện ảnh']")
+                 "['follow', 'Theo', 'Theo thuyền'], ['seat', 'Ngồi', 'Ghế hành khách'], ['cinema', 'Phim', 'Điện ảnh']")
           sub(U, "'Hour of day'", "'Giờ trong ngày'")
-          sub(U, "'自', 'Follow the journey'", "'自', 'Theo hành trình'")
-          sub(U, "'自', 'Weather of each place'", "'自', 'Thời tiết từng nơi'")
-          sub(U, "'止', 'Moor', () =>", "'止', 'Neo thuyền', () =>")
-          sub(U, "'音', 'Sound'", "'音', 'Âm thanh'")
-          sub(U, "'写', 'Photograph'", "'写', 'Chụp ảnh'")
-          sub(U, "'伝', 'Share this view'", "'伝', 'Chia sẻ góc nhìn'")
-          sub(U, "'記', 'About'", "'記', 'Giới thiệu'")
+          sub(U, "'自', 'Follow the journey'", "'Tự động', 'Theo hành trình'")
+          sub(U, "'自', 'Weather of each place'", "'Tự động', 'Thời tiết từng nơi'")
+          sub(U, "'止', 'Moor', () =>", "'Neo', 'Neo thuyền', () =>")
+          sub(U, "'音', 'Sound'", "'Nhạc', 'Âm thanh'")
+          sub(U, "'写', 'Photograph'", "'Chụp', 'Chụp ảnh'")
+          sub(U, "'伝', 'Share this view'", "'Chia sẻ', 'Chia sẻ góc nhìn'")
+          sub(U, "'記', 'About'", "'Info', 'Giới thiệu'")
           sub(U, "moored ? 'Set off' : 'Moor'", "moored ? 'Nhổ neo' : 'Neo thuyền'")
           sub(U, "Drag to frame · Wheel to zoom", "Vuốt để lấy khung · Chụm để zoom")
-          sub(U, "戻<i>Back</i>", "戻<i>Quay lại</i>")
+          sub(U, "戻<i>Back</i>", "Quay lại<i></i>")
           sub(U, 'aria-label="Take photograph"', 'aria-label="Chụp"')
-          sub(U, "止<i>Hold</i>", "止<i>Giữ</i>")
+          sub(U, "止<i>Hold</i>", "Neo<i></i>")
           sub(U, "<span><kbd>W S</kbd>速さ</span><span><kbd>A D</kbd>舵</span><span><kbd>Drag</kbd>見回す</span><span><kbd>Wheel</kbd>寄る</span><span><kbd>C</kbd>視点</span><span><kbd>Space</kbd>止まる</span>",
                  "<span><kbd>Cần trái</kbd>lái thuyền</span><span><kbd>Vuốt</kbd>xoay camera</span><span><kbd>Chụm</kbd>phóng to</span>")
           sub(U, '<div class="keys"><b>W / S</b><span>faster, slower</span><b>A / D</b><span>steer</span><b>Drag · Wheel</b><span>look around, come closer</span><b>C</b><span>follow, passenger, cinematic</span><b>Space</b><span>moor or set off</span><b>M</b><span>sound on or off</span><b>P · H</b><span>photograph, hide the interface</span></div>',
@@ -298,6 +300,26 @@ jobs:
               this.setStatus(p < 1 ? 'Đang tạo thế giới… ' + Math.round(p * 100) + '%' : 'Đang chuẩn bị…');
           """)
 
+          # ---------------------------------------------------------------- Vietnamese: dock labels instead of kanji
+          for k, v in [("grp('季')", "grp('Mùa')"), ("grp('時')", "grp('Giờ')"), ("grp('天')", "grp('Trời')"), ("grp('視')", "grp('Góc nhìn')")]:
+              sub(U, k, v)
+          sub(U, "this.sailBtn.firstChild.textContent = moored ? '行' : '止';", "this.sailBtn.firstChild.textContent = moored ? 'Đi' : 'Neo';")
+          sub(U, "this.holdBtn.firstChild.textContent = moored ? '行' : '止';", "this.holdBtn.firstChild.textContent = moored ? 'Đi' : 'Neo';")
+          sub(U, "`${BRANCH[Math.floor(((h + 1) % 24) / 2)]}の刻`", "'Giờ ' + ['Tý','Sửu','Dần','Mão','Thìn','Tỵ','Ngọ','Mùi','Thân','Dậu','Tuất','Hợi'][Math.floor(((h + 1) % 24) / 2)]")
+          sub(U, "<b>舟を出す</b>", "<b>Khởi hành</b>")
+          sub(U, '<span class="seal">出舟</span>', '<span class="seal">Đi</span>')
+          sub(U, "一舟　四季　千灯</div>';", "Một thuyền · Bốn mùa · Ngàn đèn</div>';")
+          open('src/ui/ui.css', 'a', encoding='utf-8').write("""
+          .dock .b { font-size: 14px; letter-spacing: 0.02em; min-width: 0; padding: 0 9px; white-space: nowrap; }
+          .dock .b.auto { font-size: 12px; }
+          .dock .cat { letter-spacing: 0.08em; margin-right: 0; font-size: 12px; }
+          @media (max-width: 1040px), (max-height: 560px) {
+            .dock .grp .cat { font-size: 15px; letter-spacing: 0; padding: 8px 8px; }
+            .dock .b { font-size: 15px; padding: 0 8px; }
+            .photo .side { font-size: 15px; }
+          }
+          """)
+
           if fails:
               print('PATCH FAILED:\n' + '\n'.join(fails)); sys.exit(1)
           print('all patches applied')
@@ -319,6 +341,7 @@ jobs:
               box.style.display = 'block';
               box.textContent += (box.textContent ? '\n---\n' : 'Lỗi (chạm để ẩn, chụp màn hình gửi lại):\n') + String(msg).slice(0, 500);
             };
+            document.addEventListener('webglcontextlost', (e) => { e.preventDefault(); show('WebGL context LOST (het bo nho GPU / iOS tu ngat)'); }, true);
             window.addEventListener('error', (e) => show((e.message || 'error') + (e.filename ? '\n' + e.filename.split('/').pop() + ':' + e.lineno : '')));
             window.addEventListener('unhandledrejection', (e) => show('Promise: ' + (e.reason && (e.reason.stack || e.reason.message) || e.reason)));
             const ce = console.error.bind(console);
@@ -328,6 +351,113 @@ jobs:
           JSEOF2
           grep -q "ui/errlog.js" src/main.js || { { echo "import './ui/errlog.js';"; cat src/main.js; } > main.tmp && mv main.tmp src/main.js; }
           head -4 src/main.js
+
+      - name: Vietnamese pass 2 (haiku, place names, season cards, brand)
+        working-directory: app
+        run: |
+          cat > vi_patch2.py <<'PYEOF'
+          #!/usr/bin/env python3
+          """Vietnamese pass 2: haiku, place names, season cards, brand text; hides the Japanese column (vertical text)."""
+          import re, sys
+
+          fails = []
+          def sub(path, old, new, count=1):
+              s = open(path, encoding='utf-8').read()
+              n = s.count(old)
+              if n < 1 or (count and n != count):
+                  fails.append(f'{path}: expected {count} match(es), found {n}: {old[:70]!r}')
+                  return
+              open(path, 'w', encoding='utf-8').write(s.replace(old, new))
+
+          # first line of the Japanese verse -> Vietnamese version (3 lines)
+          VI = {
+           '春なれや': ['Xuân đến rồi chăng —', 'trên ngọn đồi không tên', 'một màn sương mỏng'],
+           '朝顔に': ['Hoa bìm bìm quấn', 'lấy gàu múc nước của tôi —', 'đành xin nước người'],
+           '霧しぐれ': ['Mưa phùn sương mờ —', 'ngày núi Phú Sĩ khuất bóng', 'cũng có cái thú riêng'],
+           'ながながと': ['Dài, dài làm sao —', 'một đường sông duy nhất', 'giữa cánh đồng tuyết'],
+           'さまざまの': ['Bao nhiêu chuyện cũ', 'chợt hiện về trong tâm trí —', 'hoa anh đào'],
+           '夏草や': ['Cỏ mùa hạ —', 'tất cả những gì còn lại', 'của giấc mộng chiến binh'],
+           '山は暮れて': ['Núi đã tối rồi;', 'ngoài đồng còn vương hoàng hôn', 'trên đám cỏ bạc'],
+           'いくたびも': ['Hết lần này đến lần khác', 'tôi hỏi tuyết', 'đã dày thêm bao nhiêu'],
+           '散る桜': ['Hoa đang rơi —', 'những cánh còn trên cành', 'rồi cũng sẽ rơi'],
+           '五月雨を': ['Gom hết những cơn mưa', 'đầu hạ, dòng sông chảy', 'nhanh làm sao'],
+           'この道や': ['Con đường này', 'chẳng còn ai đi nữa —', 'chiều thu'],
+           'いざさらば': ['Nào, ta đi thôi', 'ngắm tuyết, cho đến lúc', 'ngã lăn ra đất'],
+           '花の雲': ['Mây hoa anh đào —', 'tiếng chuông kia từ Ueno', 'hay từ Asakusa?'],
+           'さみだれや': ['Mưa đầu hạ —', 'trước dòng sông nước dâng', 'hai ngôi nhà'],
+           '柿くへば': ['Tôi cắn trái hồng —', 'và chuông ngân vang', 'ở chùa Hōryū'],
+           'これがまあ': ['Vậy đây rồi,', 'là nơi trú cuối cùng của tôi —', 'tuyết dày năm thước'],
+           '山路来て': ['Đi trên đường núi,', 'bỗng thấy dịu dàng —', 'một đóa violet dại'],
+           '閑さや': ['Tĩnh lặng làm sao —', 'tiếng ve sầu', 'thấm vào đá'],
+           '枯朶に': ['Trên cành khô', 'một con quạ đậu —', 'chiều thu'],
+           '初しぐれ': ['Cơn mưa đông đầu tiên —', 'đến chú khỉ cũng như muốn', 'một chiếc áo tơi nhỏ'],
+           '菜の花や': ['Hoa cải vàng —', 'trăng ở phía đông,', 'mặt trời ở phía tây'],
+           '大蛍': ['Một con đom đóm lớn', 'chầm chậm, chầm chậm', 'bay ngang qua'],
+           '物いへば': ['Khi tôi lên tiếng', 'môi bỗng lạnh đi —', 'gió thu'],
+           '冬の日や': ['Nắng đông —', 'đóng băng trên lưng ngựa,', 'cái bóng của chính tôi'],
+           '古池や': ['Ao xưa —', 'con ếch nhảy vào,', 'tiếng nước vang'],
+           'おもしろうて': ['Thật vui, rồi lại', 'thật buồn —', 'những chiếc thuyền cò biển'],
+           '名月や': ['Trăng rằm —', 'tôi đi quanh bờ ao', 'suốt đêm dài'],
+           '旅に病んで': ['Ốm giữa chuyến đi —', 'giấc mơ vẫn lang thang', 'trên cánh đồng khô'],
+          }
+
+          H = 'src/journey/haiku.js'
+          s = open(H, encoding='utf-8').read()
+          s = re.sub(r"jp: \['([^']+)', '[^']+', '[^']+'\], en: (\[[^\]]*\])", lambda m: m.group(0).replace(m.group(2), '[' + ', '.join('"' + x + '"' if "'" in x else "'" + x + "'" for x in VI[m.group(1)]) + ']') if m.group(1) in VI else (fails.append('missing ' + m.group(1)) or m.group(0)), s)
+          for k in VI:
+              if k not in s: fails.append('verse not found: ' + k)
+          open(H, 'w', encoding='utf-8').write(s)
+          for jp, kana, vi in [('春', 'はる', 'Xuân'), ('夏', 'なつ', 'Hạ'), ('秋', 'あき', 'Thu'), ('冬', 'ふゆ', 'Đông')]:
+              sub(H, f"{{ jp: '{jp}', kana: '{kana}',", f"{{ jp: '{vi}', kana: '',")
+
+          # place names
+          L = 'src/world/layout.js'
+          for jp, kana, vi in [('朝霧の瀬', 'あさぎりのせ', 'Bãi cạn sương sớm'), ('桜並木', 'さくらなみき', 'Đại lộ hoa anh đào'),
+                  ('朱の太鼓橋', 'あけのたいこばし', 'Cầu vòm đỏ son'), ('五重塔の里', 'ごじゅうのとうのさと', 'Làng chùa năm tầng'),
+                  ('竹林峡', 'ちくりんきょう', 'Hẻm tre'), ('千本鳥居', 'せんぼんとりい', 'Ngàn cổng torii'), ('御神木の湖', 'ごしんぼくのみずうみ', 'Hồ cây thần')]:
+              sub(L, f"jp: '{jp}', kana: '{kana}'", f"jp: '{vi}', kana: ''")
+
+          U = 'src/ui/ui.js'
+          sub(U, "<b>${p.jp}</b><i>${p.en}</i>", "<b>${p.en}</b>")
+          sub(U, "`${p.jp} — ${p.en}`", "`${p.en}`")
+          sub(U, "{ asagiri: '朝', sakura: '桜', bridge: '橋', village: '塔', gorge: '竹', torii: '鳥', lake: '湖' }",
+                 "{ asagiri: '1', sakura: '2', bridge: '3', village: '4', gorge: '5', torii: '6', lake: '7' }")
+          sub(U, '<div class="brand">桜幻想<small>Sakura Fantasy</small></div>', '<div class="brand">Sakura<small>Fantasy</small></div>')
+          sub(U, '<h2>桜幻想<small>Sakura Fantasy</small></h2>', '<h2>Sakura Fantasy<small>Hoa anh đào huyền ảo</small></h2>')
+          sub(U, "'<span>桜</span><span>幻</span><span>想</span>'", "'<span>Sakura</span><span>Fantasy</span>'")
+          sub(U, "chars('桜幻想', 0.2, 0.32)", "chars('Sakura', 0.2, 0.32)")
+          sub(U, "chars('一舟　四季　千灯', 1.3, 0.07)", "chars('Một thuyền · Bốn mùa · Ngàn đèn', 1.3, 0.07)")
+          sub(U, "g.fillText('桜', 0, 1 * k);", "g.fillText('S', 0, 1 * k);")
+          sub(U, '<div class="seal">桜幻</div>', '<div class="seal">SF</div>')
+          sub(U, "'この地　この季　この刻'", "'Đã sao chép liên kết'")
+          sub(U, "'写してお持ちください'", "'Hãy chụp màn hình để lưu'")
+          sub(U, "The river is open source — GitHub", "Dòng sông là mã nguồn mở — GitHub")
+          sub(U, "Textures and scanned rocks, ferns and logs from", "Texture, đá, dương xỉ và khúc gỗ quét 3D từ")
+          sub(U, "plant scans (CC0). ", "(CC0). ")
+          sub(U, "Trees, flowers and grasses rendered from", "Cây, hoa và cỏ dựng từ bản quét thực vật của")
+          sub(U, " by <a href=\"https://sketchfab.com/Z-gon\"", " của <a href=\"https://sketchfab.com/Z-gon\"")
+          sub(U, "All sources</a>", "Toàn bộ nguồn</a>")
+
+          for k, v in [('<b>視</b>', '<b>Góc</b>'), ('<b>止</b>', '<b>Neo</b>'), ('<b>音</b>', '<b>Nhạc</b>'), ('<b>写</b>', '<b>Chụp</b>'), ('">撮</button>', '">●</button>')]:
+              sub(U, k, v)
+
+          # the vertical Japanese column (name, kana, number, haiku) is replaced by the Vietnamese lines below it
+          open('src/ui/ui.css', 'a', encoding='utf-8').write("""
+          .chapter .col .name, .chapter .col .kana, .chapter .col .num, .chapter .col .haiku { display: none; }
+          .chapter .en .place { text-transform: none; letter-spacing: 0.12em; font-size: clamp(15px, 2vh, 19px); }
+          .chapter .en .by { text-transform: none; letter-spacing: 0.1em; }
+          .paper .glyph { font-size: min(26vmin, 220px); letter-spacing: 0.02em; }
+          .paper .cap .e { text-transform: none; }
+          #load .title { writing-mode: horizontal-tb; flex-direction: column; align-items: center; letter-spacing: 0.08em; font-size: clamp(30px, 11vh, 64px); gap: 0.1em; }
+          .scroll .brand { writing-mode: horizontal-tb; font-size: 15px; letter-spacing: 0.12em; }
+          """)
+
+          if fails:
+              print('PATCH2 FAILED:\n' + '\n'.join(fails)); sys.exit(1)
+          print('vi pass 2 applied')
+          PYEOF
+          python3 vi_patch2.py
+          rm -f vi_patch2.py
 
       - name: Install deps + Capacitor
         working-directory: app
