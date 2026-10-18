@@ -469,6 +469,41 @@ jobs:
         working-directory: app
         run: rm -rf public/assets/models/hi
 
+      - name: Shrink textures for phones (stops the WebGL context from being lost)
+        working-directory: app
+        run: |
+          python3 -m pip install --quiet --break-system-packages pillow || python3 -m pip install --quiet --user pillow
+          cat > shrink_tex.py <<'PYEOF'
+          # Phones lose the WebGL context when ~600 MB of decoded textures are uploaded. Halve the colour maps and
+          # quarter the normal maps: UVs are normalised, so nothing else in the game has to change.
+          import sys, glob, os
+          from PIL import Image
+          before = after = 0
+          for p in sorted(glob.glob(os.path.join(sys.argv[1], '*.webp'))):
+              im = Image.open(p); w, h = im.size
+              target = 512 if p.endswith('_n.webp') else 1024
+              k = min(1.0, target / max(w, h))
+              before += w * h
+              if k < 1:
+                  nw, nh = max(1, round(w * k)), max(1, round(h * k))
+                  if im.mode not in ('RGB', 'RGBA'): im = im.convert('RGBA' if 'A' in im.getbands() else 'RGB')
+                  im.resize((nw, nh), Image.LANCZOS).save(p, 'WEBP', quality=88, method=4)
+                  after += nw * nh
+              else:
+                  after += w * h
+          print('textures: %.0f MB -> %.0f MB (decoded, with mips)' % (before * 5.3 / 1e6, after * 5.3 / 1e6))
+          PYEOF
+          python3 shrink_tex.py public/assets/tex
+          rm -f shrink_tex.py
+          python3 - <<'PYEOF2'
+          p = 'src/world/grass.js'
+          s = open(p, encoding='utf-8').read()
+          old = 'dFdx(vCardUv * 2048.0), dv = dFdy(vCardUv * 2048.0)'
+          assert s.count(old) == 1, 'grass lod constant not found'
+          open(p, 'w', encoding='utf-8').write(s.replace(old, 'dFdx(vCardUv * 1024.0), dv = dFdy(vCardUv * 1024.0)'))
+          print('grass lod constant updated')
+          PYEOF2
+
       - name: Build web
         working-directory: app
         run: npm run build
