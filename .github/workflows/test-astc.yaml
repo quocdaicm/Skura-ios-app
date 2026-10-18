@@ -98,18 +98,28 @@ jobs:
             "$ASTCENC" $MODE "$f" "t/astc/$n.astc" "$BLOCK" -$Q $EXTRA > /dev/null
             T1=$(date +%s.%N)
             # test mode: compress + decompress, prints PSNR (khong ghi file)
-            PSNR="$("$ASTCENC" ${MODE/-c/-t} "$f" "t/astc/$n.test.png" "$BLOCK" -$Q $EXTRA 2>&1 | grep -i -E 'PSNR' | grep -v -i 'mpsnr\|alpha' | head -1 | sed 's/.*: *//')"
+            "$ASTCENC" ${MODE/-c/-t} "$f" "t/astc/$n.test.png" "$BLOCK" -$Q $EXTRA > "t/astc/$n.log" 2>&1 || true
+            PSNR="$(grep -i 'PSNR' "t/astc/$n.log" | sed 's/^ *//' | tr '\n' ';' || true)"
             W=$(python3 -c "from PIL import Image; im=Image.open('$f'); print(im.width*im.height*4)")
             A=$(stat -f%z "t/astc/$n.astc")
             echo "| $n | $((W/1024)) KB | $((A/1024)) KB | ${PSNR:-?} | $(printf '%.1f' "$(echo "$T1 - $T0" | bc)")s |" >> summary.md
           done
           cat summary.md | tee -a "$GITHUB_STEP_SUMMARY"
+          echo "--- raw astcenc test output (rock_face_c, rock_face_n):"
+          cat t/astc/rock_face_c.log; echo ----; cat t/astc/rock_face_n.log
 
       - name: Try KTX2 packaging with mipmaps (toktx)
         continue-on-error: true
+        env:
+          GH_TOKEN: ${{ github.token }}
         run: |
           BLOCK="${{ inputs.block }}"; Q="${{ inputs.quality }}"
-          brew install ktx || { echo "brew install ktx failed"; exit 1; }
+          mkdir -p ktxpkg
+          gh release download --repo KhronosGroup/KTX-Software --pattern '*Darwin-arm64.pkg' --dir ktxpkg
+          ls -l ktxpkg
+          sudo installer -pkg ktxpkg/*.pkg -target /
+          export PATH="/usr/local/bin:$PATH"
+          toktx --version
           mkdir -p t/ktx2
           for f in t/png/*.png; do
             n="$(basename "$f" .png)"
