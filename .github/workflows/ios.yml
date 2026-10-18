@@ -169,8 +169,8 @@ jobs:
           }
 
           JSEOF
-          grep -q "ui/touch.js" src/main.js || sed -i "1i import './ui/touch.js';" src/main.js
-          grep -q "ui/ios-audio.js" src/main.js || sed -i "1i import './ui/ios-audio.js';" src/main.js
+          grep -q "ui/touch.js" src/main.js || { { echo "import './ui/touch.js';"; cat src/main.js; } > main.tmp && mv main.tmp src/main.js; }
+          grep -q "ui/ios-audio.js" src/main.js || { { echo "import './ui/ios-audio.js';"; cat src/main.js; } > main.tmp && mv main.tmp src/main.js; }
           head -3 src/main.js
 
       - name: Patch for iPhone (lighter graphics, no intro, audio on touch, Vietnamese UI)
@@ -326,7 +326,7 @@ jobs:
           })();
 
           JSEOF2
-          grep -q "ui/errlog.js" src/main.js || sed -i "1i import './ui/errlog.js';" src/main.js
+          grep -q "ui/errlog.js" src/main.js || { { echo "import './ui/errlog.js';"; cat src/main.js; } > main.tmp && mv main.tmp src/main.js; }
           head -4 src/main.js
 
       - name: Install deps + Capacitor
