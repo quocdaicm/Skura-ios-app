@@ -55,14 +55,14 @@ jobs:
         working-directory: app
         run: |
           npm ci --ignore-scripts
-          echo "three: $(node -p "require('three/package.json').version")"
+          echo "three: $(grep -m1 '"version"' node_modules/three/package.json)"
           echo "--- ASTC formats known to KTX2Loader:"
           grep -o -E 'ASTC_[0-9]+x[0-9]+_(SRGB|UNORM)_BLOCK' node_modules/three/examples/jsm/loaders/KTX2Loader.js | sort -u || echo "none found"
 
       - name: Pick sample textures and convert to PNG
         working-directory: app
         run: |
-          python3 -m pip install --quiet pillow
+          python3 -m pip install --quiet --break-system-packages pillow || python3 -m pip install --quiet --user pillow
           mkdir -p ../t/png ../t/astc
           python3 - <<'PY'
           import os
