@@ -1,0 +1,129 @@
+name: Test ASTC texture compression
+
+# Chay thu rieng, KHONG dong vao build-ios.yaml. Chi nen vai texture mau, in ra dung luong + PSNR.
+# Xem ket qua o tab Summary cua lan chay va artifact "astc-test".
+
+on:
+  workflow_dispatch:
+    inputs:
+      block:
+        description: 'Kich thuoc block ASTC (4x4 = net nhat, 6x6 = can bang, 8x8 = nhe nhat)'
+        default: '6x6'
+      quality:
+        description: 'Chat luong astcenc (fast / medium / thorough)'
+        default: 'medium'
+
+permissions:
+  contents: read
+
+jobs:
+  astc:
+    runs-on: macos-15
+    timeout-minutes: 30
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Get source (sakura-part*.zip)
+        run: |
+          mkdir -p app
+          for z in sakura-part*.zip; do unzip -q -o "$z" -d app; done
+          test -f app/package.json || { echo "package.json not found"; exit 1; }
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: Build astcenc from source
+        run: |
+          brew install cmake
+          git clone --depth 1 https://github.com/ARM-software/astc-encoder.git astc-src
+          cd astc-src
+          git log -1 --format='astcenc commit: %h %cd'
+          cmake -S . -B build -DCMAKE_BUILD_TYPE=Release -DASTCENC_ISA_NEON=ON -DASTCENC_CLI=ON
+          cmake --build build -j4
+          BIN="$(find build -type f -name 'astcenc-neon*' -perm -u+x | head -1)"
+          test -n "$BIN" || { echo "astcenc binary not found"; find build -maxdepth 3 -type f | head -30; exit 1; }
+          echo "ASTCENC=$PWD/$BIN" >> "$GITHUB_ENV"
+          "$PWD/$BIN" -version | head -3
+          echo "--- options that matter:"
+          "$PWD/$BIN" -help | grep -E -- '-normal|-cs |-cl |-tl|-ts|-esw|-medium|-thorough' | head -12 || true
+
+      - name: Check three.js KTX2Loader supports the chosen ASTC block
+        working-directory: app
+        run: |
+          npm ci --ignore-scripts
+          echo "three: $(node -p "require('three/package.json').version")"
+          echo "--- ASTC formats known to KTX2Loader:"
+          grep -o -E 'ASTC_[0-9]+x[0-9]+_(SRGB|UNORM)_BLOCK' node_modules/three/examples/jsm/loaders/KTX2Loader.js | sort -u || echo "none found"
+
+      - name: Pick sample textures and convert to PNG
+        working-directory: app
+        run: |
+          python3 -m pip install --quiet pillow
+          mkdir -p ../t/png ../t/astc
+          python3 - <<'PY'
+          import os
+          from PIL import Image
+          # 1 texture lap lai + 1 atlas co alpha + normal map tuong ung, theo dung kich thuoc workflow build-ios
+          samples = ['turf_c', 'turf_n', 'sakura_blossom', 'sakura_blossom_n', 'rock_face_c', 'rock_face_n']
+          for n in samples:
+              p = f'public/assets/tex/{n}.webp'
+              im = Image.open(p)
+              tgt = 512 if n.endswith('_n') else 1024
+              k = min(1.0, tgt / max(im.size))
+              if k < 1:
+                  im = im.resize((round(im.width*k), round(im.height*k)), Image.LANCZOS)
+              if im.mode not in ('RGB', 'RGBA'): im = im.convert('RGBA')
+              im.save(f'../t/png/{n}.png')
+              print(n, im.size, im.mode)
+          PY
+
+      - name: Compress with astcenc (size + PSNR)
+        run: |
+          BLOCK="${{ inputs.block }}"; Q="${{ inputs.quality }}"
+          NORMAL_FLAG=""
+          "$ASTCENC" -help | grep -q -- '-normal ' && NORMAL_FLAG="-normal"
+          {
+            echo "### ASTC $BLOCK -$Q"
+            echo "| texture | PNG (RGBA8) | ASTC | PSNR | encode time |"
+            echo "|---|---|---|---|---|"
+          } > summary.md
+          for f in t/png/*.png; do
+            n="$(basename "$f" .png)"
+            if [[ "$n" == *_n ]]; then MODE="-cl"; EXTRA="$NORMAL_FLAG"; else MODE="-cs"; EXTRA=""; fi
+            T0=$(date +%s.%N)
+            "$ASTCENC" $MODE "$f" "t/astc/$n.astc" "$BLOCK" -$Q $EXTRA > /dev/null
+            T1=$(date +%s.%N)
+            # test mode: compress + decompress, prints PSNR (khong ghi file)
+            PSNR="$("$ASTCENC" ${MODE/-c/-t} "$f" "t/astc/$n.test.png" "$BLOCK" -$Q $EXTRA 2>&1 | grep -i -E 'PSNR' | grep -v -i 'mpsnr\|alpha' | head -1 | sed 's/.*: *//')"
+            W=$(python3 -c "from PIL import Image; im=Image.open('$f'); print(im.width*im.height*4)")
+            A=$(stat -f%z "t/astc/$n.astc")
+            echo "| $n | $((W/1024)) KB | $((A/1024)) KB | ${PSNR:-?} | $(printf '%.1f' "$(echo "$T1 - $T0" | bc)")s |" >> summary.md
+          done
+          cat summary.md | tee -a "$GITHUB_STEP_SUMMARY"
+
+      - name: Try KTX2 packaging with mipmaps (toktx)
+        continue-on-error: true
+        run: |
+          BLOCK="${{ inputs.block }}"; Q="${{ inputs.quality }}"
+          brew install ktx || { echo "brew install ktx failed"; exit 1; }
+          mkdir -p t/ktx2
+          for f in t/png/*.png; do
+            n="$(basename "$f" .png)"
+            if [[ "$n" == *_n ]]; then OETF=linear; else OETF=srgb; fi
+            toktx --t2 --encode astc --astc_blk_d "$BLOCK" --astc_quality "$Q" --genmipmap \
+                  --assign_oetf $OETF --assign_primaries bt709 "t/ktx2/$n.ktx2" "$f"
+          done
+          echo "### KTX2 (ASTC $BLOCK + mipmap)" | tee -a "$GITHUB_STEP_SUMMARY"
+          ls -l t/ktx2 | awk '{print $5, $9}' | tee -a "$GITHUB_STEP_SUMMARY"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: astc-test
+          path: |
+            t/astc
+            t/ktx2
+            summary.md
