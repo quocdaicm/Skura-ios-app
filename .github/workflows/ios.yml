@@ -173,6 +173,162 @@ jobs:
           grep -q "ui/ios-audio.js" src/main.js || sed -i "1i import './ui/ios-audio.js';" src/main.js
           head -3 src/main.js
 
+      - name: Patch for iPhone (lighter graphics, no intro, audio on touch, Vietnamese UI)
+        working-directory: app
+        run: |
+          cat > mobile_patch.py <<'PYEOF'
+          #!/usr/bin/env python3
+          """Sakura Fantasy -> iPhone: lighter rendering, no intro screen, audio unlock, Vietnamese UI.
+          Run from the project root. Every replacement must match or the build stops (so nothing is silently skipped)."""
+          import sys
+
+          fails = []
+          def sub(path, old, new, count=1):
+              s = open(path, encoding='utf-8').read()
+              n = s.count(old)
+              if n < 1 or (count and n != count):
+                  fails.append(f'{path}: expected {count} match(es), found {n}: {old[:70]!r}')
+                  return
+              open(path, 'w', encoding='utf-8').write(s.replace(old, new))
+
+          # ---------------------------------------------------------------- main.js: no intro, audio on first touch
+          M = 'src/main.js'
+          sub(M, "const direct = params.size > 0 && !params.has('intro');", "const direct = !params.has('intro');")
+          sub(M, "sun.shadow.mapSize.set(2048, 2048);", "sun.shadow.mapSize.set(1024, 1024);")
+          sub(M, "  await warmShaders(pipe, scene, camera);\n",
+                 "  ui.setStatus('Đang biên dịch hiệu ứng ánh sáng… lần đầu có thể mất 1–2 phút');\n  await new Promise((r) => setTimeout(r, 60));\n  await warmShaders(pipe, scene, camera);\n")
+          sub(M, "  if (direct) {\n    ui.skip();\n  } else {", """  if (direct) {
+              ui.skip();
+              {
+                const hint = document.createElement('div');
+                hint.textContent = '🔊 Chạm màn hình để bật nhạc';
+                hint.style.cssText = 'position:fixed;left:50%;bottom:calc(env(safe-area-inset-bottom,0px) + 12px);transform:translateX(-50%);z-index:9;padding:7px 16px;border-radius:999px;background:rgba(11,10,13,.6);color:#fff3ea;font:14px serif;letter-spacing:.06em;pointer-events:none;transition:opacity .6s';
+                document.body.appendChild(hint);
+                const evs = ['touchend', 'click', 'pointerup'];
+                const done = () => { evs.forEach((t) => window.removeEventListener(t, kick, true)); hint.style.opacity = '0'; setTimeout(() => hint.remove(), 700); };
+                const kick = () => {
+                  try {
+                    if (!sound.ctx) sound.start(); else sound.setOn(true);
+                    ctl.sound = true;
+                    if (sound.ctx) {
+                      if (sound.ctx.state === 'running') done();
+                      else sound.ctx.addEventListener('statechange', () => { if (sound.ctx.state === 'running') done(); });
+                    }
+                  } catch (e) { console.warn('[sf] audio', e); }
+                };
+                evs.forEach((t) => window.addEventListener(t, kick, true));
+              }
+            } else {""")
+          sub(M, "この端末では舟を出せません · WebGL2 is required", "Thiết bị này chưa chạy được · cần WebGL2")
+
+          # ---------------------------------------------------------------- pipeline.js: lighter on phones
+          P = 'src/core/pipeline.js'
+          sub(P, "this.dpr = Math.min(window.devicePixelRatio || 1, 2);", "this.dpr = Math.min(window.devicePixelRatio || 1, 1.5);")
+          sub(P, "this.scale = 1; // fraction of device pixels", "this.scale = 0.7; // fraction of device pixels")
+          sub(P, "this.minScale = 0.5;", "this.minScale = 0.4;")
+          sub(P, "this.reflScale = 0.5;", "this.reflScale = 0.3;")
+          sub(P, "this.shadowEvery = 1;", "this.shadowEvery = 2;")
+          sub(P, "if (camY > 0.05) this.reflection.render(", "if (camY > 0.05 && (this.frame & 1) === 0) this.reflection.render(")
+
+          # ---------------------------------------------------------------- grass: ~half the instances
+          G = 'src/world/place-grass.js'
+          sub(G, "for (let z = zFrom; z > zTo; z -= 0.95) {", "for (let z = zFrom; z > zTo; z -= 1.4) {")
+          sub(G, "x < cx + span; x += 0.95) {", "x < cx + span; x += 1.4) {")
+          sub(G, "const jx = x + R.range(-0.47, 0.47), jz = z + R.range(-0.47, 0.47);", "const jx = x + R.range(-0.7, 0.7), jz = z + R.range(-0.7, 0.7);")
+          sub(G, "R.range(0.9, 1.45) * (sd < 3 ? 0.85 : 1)", "R.range(1.1, 1.75) * (sd < 3 ? 0.9 : 1)")
+
+          # ---------------------------------------------------------------- Vietnamese: place + season names
+          L = 'src/world/layout.js'
+          for en, vi in [("Shallows of Morning Mist", "Bãi cạn sương sớm"), ("The Cherry Avenue", "Đại lộ hoa anh đào"),
+                         ("The Vermilion Drum Bridge", "Cầu vòm đỏ son"), ("Village of the Five-Storey Pagoda", "Làng chùa năm tầng"),
+                         ("The Bamboo Gorge", "Hẻm tre"), ("A Thousand Gates", "Ngàn cổng torii"), ("Lake of the Sacred Tree", "Hồ cây thần")]:
+              sub(L, f"en: '{en}'", f"en: '{vi}'")
+          H = 'src/journey/haiku.js'
+          for en, vi in [("The Spring Scroll", "Cuộn tranh mùa xuân"), ("The Summer Scroll", "Cuộn tranh mùa hạ"),
+                         ("The Autumn Scroll", "Cuộn tranh mùa thu"), ("The Winter Scroll", "Cuộn tranh mùa đông")]:
+              sub(H, f"en: '{en}'", f"en: '{vi}'")
+
+          # ---------------------------------------------------------------- Vietnamese: interface
+          U = 'src/ui/ui.js'
+          sub(U, "[['春', 'Spring'], ['夏', 'Summer'], ['秋', 'Autumn'], ['冬', 'Winter']]", "[['春', 'Xuân'], ['夏', 'Hạ'], ['秋', 'Thu'], ['冬', 'Đông']]")
+          sub(U, "['clear', '晴', 'Clear'], ['mist', '霧', 'Mist'], ['rain', '雨', 'Rain'], ['storm', '嵐', 'Storm'], ['snow', '雪', 'Snow']",
+                 "['clear', '晴', 'Trời quang'], ['mist', '霧', 'Sương mù'], ['rain', '雨', 'Mưa'], ['storm', '嵐', 'Bão'], ['snow', '雪', 'Tuyết']")
+          sub(U, "['follow', '随', 'Follow'], ['seat', '座', 'Passenger'], ['cinema', '映', 'Cinematic']",
+                 "['follow', '随', 'Theo thuyền'], ['seat', '座', 'Ghế hành khách'], ['cinema', '映', 'Điện ảnh']")
+          sub(U, "'Hour of day'", "'Giờ trong ngày'")
+          sub(U, "'自', 'Follow the journey'", "'自', 'Theo hành trình'")
+          sub(U, "'自', 'Weather of each place'", "'自', 'Thời tiết từng nơi'")
+          sub(U, "'止', 'Moor', () =>", "'止', 'Neo thuyền', () =>")
+          sub(U, "'音', 'Sound'", "'音', 'Âm thanh'")
+          sub(U, "'写', 'Photograph'", "'写', 'Chụp ảnh'")
+          sub(U, "'伝', 'Share this view'", "'伝', 'Chia sẻ góc nhìn'")
+          sub(U, "'記', 'About'", "'記', 'Giới thiệu'")
+          sub(U, "moored ? 'Set off' : 'Moor'", "moored ? 'Nhổ neo' : 'Neo thuyền'")
+          sub(U, "Drag to frame · Wheel to zoom", "Vuốt để lấy khung · Chụm để zoom")
+          sub(U, "戻<i>Back</i>", "戻<i>Quay lại</i>")
+          sub(U, 'aria-label="Take photograph"', 'aria-label="Chụp"')
+          sub(U, "止<i>Hold</i>", "止<i>Giữ</i>")
+          sub(U, "<span><kbd>W S</kbd>速さ</span><span><kbd>A D</kbd>舵</span><span><kbd>Drag</kbd>見回す</span><span><kbd>Wheel</kbd>寄る</span><span><kbd>C</kbd>視点</span><span><kbd>Space</kbd>止まる</span>",
+                 "<span><kbd>Cần trái</kbd>lái thuyền</span><span><kbd>Vuốt</kbd>xoay camera</span><span><kbd>Chụm</kbd>phóng to</span>")
+          sub(U, '<div class="keys"><b>W / S</b><span>faster, slower</span><b>A / D</b><span>steer</span><b>Drag · Wheel</b><span>look around, come closer</span><b>C</b><span>follow, passenger, cinematic</span><b>Space</b><span>moor or set off</span><b>M</b><span>sound on or off</span><b>P · H</b><span>photograph, hide the interface</span></div>',
+                 '<div class="keys"><b>Cần trái</b><span>kéo lên/xuống: nhanh/chậm · trái/phải: lái</span><b>Vuốt</b><span>xoay camera</span><b>Chụm</b><span>phóng to, thu nhỏ</span><b>視</b><span>đổi góc nhìn: theo thuyền, hành khách, điện ảnh</span><b>止</b><span>neo thuyền / nhổ neo</span><b>音</b><span>bật / tắt âm thanh</span><b>写</b><span>chụp ảnh</span></div>')
+          sub(U, "A boat journey down one river, through four seasons and a thousand lights — from the morning mist, under the cherry avenue and the vermilion bridge, past the village of the five-storey pagoda and through the bamboo gorge, beneath a thousand gates to the lake of the sacred tree. Each voyage turns the season.",
+                 "Một chuyến đi thuyền trên dòng sông, qua bốn mùa và ngàn ánh đèn — từ sương sớm, dưới đại lộ hoa anh đào và cây cầu đỏ son, qua làng chùa năm tầng và hẻm tre, dưới ngàn cổng torii tới hồ cây thần. Mỗi chuyến đi lại sang một mùa mới.")
+          sub(U, "Inspired by Meng To’s ", "Lấy cảm hứng từ ")
+          sub(U, ". Built from scratch with three.js; the ", ". Viết từ đầu bằng three.js; ")
+          sub(U, ">source is on GitHub</a>", ">mã nguồn trên GitHub</a>")
+          sub(U, "Haiku by Bashō, Buson, Issa, Shiki, Bonchō, Ryōkan and Chiyo-ni; English versions written for this piece.", "Haiku của Bashō, Buson, Issa, Shiki, Bonchō, Ryōkan và Chiyo-ni; bản tiếng Anh viết riêng cho tác phẩm này.")
+          sub(U, "'This place, this season, this hour — the link is copied'", "'Đã sao chép liên kết: đúng nơi, đúng mùa, đúng giờ'")
+          sub(U, "<i>Set sail</i>", "<i>Nhổ neo</i>")
+          sub(U, "Open source on GitHub", "Mã nguồn mở trên GitHub")
+          sub(U, 'aria-label="Close"', 'aria-label="Đóng"')
+          # loading status text (Vietnamese) under the ink circle
+          sub(U, "  // loading can finish in a blink; the brush still takes its time\n  progress(p) {\n",
+                 """  setStatus(t) {
+              if (!this.statusEl) {
+                this.statusEl = document.createElement('div');
+                this.statusEl.style.cssText = 'position:absolute;left:0;right:0;bottom:7vh;text-align:center;font:15px serif;letter-spacing:.1em;color:#fff3ea;opacity:.85;padding:0 20px;z-index:3';
+                this.loader.appendChild(this.statusEl);
+              }
+              this.statusEl.textContent = t;
+            }
+
+            // loading can finish in a blink; the brush still takes its time
+            progress(p) {
+              this.setStatus(p < 1 ? 'Đang tạo thế giới… ' + Math.round(p * 100) + '%' : 'Đang chuẩn bị…');
+          """)
+
+          if fails:
+              print('PATCH FAILED:\n' + '\n'.join(fails)); sys.exit(1)
+          print('all patches applied')
+
+          PYEOF
+          python3 mobile_patch.py
+          rm -f mobile_patch.py
+          cat > src/ui/errlog.js <<'JSEOF2'
+          // Shows errors on screen (in Vietnamese) so they can be screenshotted: there is no console on a phone.
+          (() => {
+            const box = document.createElement('pre');
+            box.style.cssText = 'position:fixed;left:8px;right:8px;top:calc(env(safe-area-inset-top,0px) + 8px);max-height:40vh;overflow:auto;z-index:99999;margin:0;padding:8px 10px;border-radius:8px;background:rgba(120,10,10,.88);color:#fff;font:11px/1.35 monospace;white-space:pre-wrap;display:none';
+            box.addEventListener('click', () => { box.style.display = 'none'; box.textContent = ''; });
+            const attach = () => document.body && document.body.appendChild(box);
+            if (document.body) attach(); else document.addEventListener('DOMContentLoaded', attach);
+            let n = 0;
+            const show = (msg) => {
+              if (n++ > 6) return;
+              box.style.display = 'block';
+              box.textContent += (box.textContent ? '\n---\n' : 'Lỗi (chạm để ẩn, chụp màn hình gửi lại):\n') + String(msg).slice(0, 500);
+            };
+            window.addEventListener('error', (e) => show((e.message || 'error') + (e.filename ? '\n' + e.filename.split('/').pop() + ':' + e.lineno : '')));
+            window.addEventListener('unhandledrejection', (e) => show('Promise: ' + (e.reason && (e.reason.stack || e.reason.message) || e.reason)));
+            const ce = console.error.bind(console);
+            console.error = (...a) => { ce(...a); show(a.map((x) => (x && x.message) || String(x)).join(' ')); };
+          })();
+
+          JSEOF2
+          grep -q "ui/errlog.js" src/main.js || sed -i "1i import './ui/errlog.js';" src/main.js
+          head -4 src/main.js
+
       - name: Install deps + Capacitor
         working-directory: app
         run: |
