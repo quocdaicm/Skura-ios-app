@@ -8,6 +8,17 @@ on:
 permissions:
   contents: read
 
+# Chat luong: tang so neu may con du bo nho GPU, giam neu thay "WebGL context LOST".
+env:
+  SF_TEX_COLOR: '1024'   # canh toi da anh mau (2048 = goc, 1024 = nhe)
+  SF_TEX_NORMAL: '512'   # canh toi da anh normal map
+  SF_DPR: '1.5'          # do phan giai render toi da (1.5 = nhe, 3 = nhu man hinh)
+  SF_MSAA: '2'           # khu rang cua: 0, 2 hoac 4
+  SF_ASTC_COLOR: '6x6'   # nen ASTC cho anh mau (three 0.186 chi ho tro 4x4 hoac 6x6)
+  SF_ASTC_NORMAL: '4x4'  # nen ASTC cho normal map (4x4 net hon, 6x6 nhe hon)
+  SF_ASTC_QUALITY: 'medium'  # fast / medium / thorough
+  SF_KEEP_WEBP: '1'      # 1 = giu .webp lam du phong; 0 = xoa sau khi nen xong (IPA nho hon)
+
 jobs:
   build:
     runs-on: macos-15
@@ -82,7 +93,7 @@ jobs:
 
             const home = () => ({
               x: Math.max(R + 28, 0) + (parseInt(getComputedStyle(document.documentElement).getPropertyValue('--sal')) || 0) + 30,
-              y: window.innerHeight - R - 34,
+              y: window.innerHeight - R - 96,
             });
             const place = (cx, cy) => { base.style.left = cx - R + 'px'; base.style.top = cy - R + 'px'; };
             const reset = () => { const h = home(); place(h.x, h.y); stick.style.transform = ''; };
@@ -223,12 +234,11 @@ jobs:
 
           # ---------------------------------------------------------------- pipeline.js: lighter on phones
           P = 'src/core/pipeline.js'
-          sub(P, "this.dpr = Math.min(window.devicePixelRatio || 1, 2);", "this.dpr = Math.min(window.devicePixelRatio || 1, 1.5);")
-          sub(P, "this.scale = 1; // fraction of device pixels", "this.scale = 0.7; // fraction of device pixels")
-          sub(P, "this.minScale = 0.5;", "this.minScale = 0.4;")
+          import os
+          sub(P, "this.dpr = Math.min(window.devicePixelRatio || 1, 2);", "this.dpr = Math.min(window.devicePixelRatio || 1, " + os.environ.get('SF_DPR', '2') + ");")
           sub(P, "this.reflScale = 0.5;", "this.reflScale = 0.3;")
           sub(P, "this.shadowEvery = 1;", "this.shadowEvery = 2;")
-          sub(P, "this.rtOpaque.samples = this.dpr >= 1.5 ? 2 : 4;", "this.rtOpaque.samples = 0; // no MSAA on phones: saves a lot of GPU memory (context was being lost)")
+          sub(P, "this.rtOpaque.samples = this.dpr >= 1.5 ? 2 : 4;", "this.rtOpaque.samples = " + os.environ.get('SF_MSAA', '2') + ";")
           sub(P, "powerPreference: 'high-performance', ", "powerPreference: 'default', ")
           sub(P, "if (camY > 0.05) this.reflection.render(", "if (camY > 0.05 && (this.frame & 1) === 0) this.reflection.render(")
 
@@ -450,6 +460,10 @@ jobs:
           .paper .cap .e { text-transform: none; }
           #load .title { writing-mode: horizontal-tb; flex-direction: column; align-items: center; letter-spacing: 0.08em; font-size: clamp(30px, 11vh, 64px); gap: 0.1em; }
           .scroll .brand { writing-mode: horizontal-tb; font-size: 15px; letter-spacing: 0.12em; }
+          .dock .b { color: rgba(243, 237, 226, 0.88); font-weight: 600; }
+          .dock .b.on, .dock .b:hover { color: #fff; }
+          .dock .cat, .dock .grp .cat { color: #fff3ea; font-weight: 600; }
+          .dock, .chapter .en, .toast { text-shadow: 0 1px 2px rgba(0, 0, 0, 0.9), 0 0 14px rgba(0, 0, 0, 0.7); }
           """)
 
           if fails:
@@ -458,6 +472,77 @@ jobs:
           PYEOF
           python3 vi_patch2.py
           rm -f vi_patch2.py
+
+      - name: Use ASTC-aware texture loader (writes src/core/assets.js)
+        working-directory: app
+        run: |
+          cat > src/core/assets.js <<'JSEOF'
+          import * as THREE from 'three';
+          import { ktx2 } from './shared.js';
+
+          const BASE = './assets/tex/';
+          export const TEX_LIST = [
+            'forrest_ground_01', 'leafy_grass', 'rock_face', 'lichen_rock', 'ganges_river_pebbles', 'snow_02', 'forest_leaves_02',
+            'weathered_planks', 'hinoki_planks', 'sakura_bark', 'pine_bark', 'japanese_cedar_bark', 'jolcham_oak_bark_01', 'trident_maple_bark',
+            'japanese_stone_wall', 'grey_roof_tiles', 'reed_roof_04', 'painted_plaster_wall', 'turf',
+          ];
+          // foliage atlases with alpha, clamped (one file each, no normal map)
+          export const ATLAS_LIST = ['sakura_blossom', 'sakura_blossom_n', 'ground_flora', 'ground_flora_n', 'azalea_atlas', 'azalea_atlas_n', 'conifer_atlas', 'conifer_atlas_n', 'maple_atlas', 'maple_atlas_n', 'tall_flora', 'tall_flora_n', 'broad_atlas', 'broad_atlas_n', 'sakura_leaf', 'sakura_leaf_n', 'bamboo_atlas', 'bamboo_atlas_n'];
+
+          // ASTC (.ktx2) is tried first; if the file is missing or the GPU cannot use it, the .webp is loaded instead.
+          // KTX2 files carry their own mip chain and colour space, so those are left to the loader.
+          async function loadTex(renderer, ktxLoader, imgLoader, base) {
+            try {
+              const t = await ktxLoader.loadAsync(`${base}.ktx2`);
+              t.isKtx = true;
+              return t;
+            } catch (e) {
+              console.warn('[sf] ktx2 -> webp fallback: ' + base + ' (' + (e && e.message || e) + ')');
+              return imgLoader.loadAsync(`${base}.webp`);
+            }
+          }
+
+          export async function loadTextures(renderer, onProgress) {
+            const loader = new THREE.TextureLoader();
+            const kloader = ktx2(renderer);
+            const aniso = Math.min(8, renderer.capabilities.getMaxAnisotropy());
+            const out = {};
+            const jobs = [];
+            let done = 0;
+            const total = TEX_LIST.length * 2 + ATLAS_LIST.length;
+            for (const id of TEX_LIST) {
+              for (const m of ['c', 'n']) {
+                jobs.push(
+                  loadTex(renderer, kloader, loader, `${BASE}${id}_${m}`).then((t) => {
+                    t.wrapS = t.wrapT = THREE.RepeatWrapping;
+                    t.anisotropy = aniso;
+                    t.colorSpace = m === 'c' ? THREE.SRGBColorSpace : THREE.NoColorSpace;
+                    if (!t.isKtx) { t.generateMipmaps = true; t.minFilter = THREE.LinearMipmapLinearFilter; }
+                    out[`${id}_${m}`] = t;
+                    done++;
+                    onProgress && onProgress(done / total);
+                  })
+                );
+              }
+            }
+            for (const id of ATLAS_LIST) {
+              jobs.push(
+                loadTex(renderer, kloader, loader, `${BASE}${id}`).then((t) => {
+                  t.wrapS = t.wrapT = THREE.ClampToEdgeWrapping;
+                  t.anisotropy = aniso;
+                  t.colorSpace = id.endsWith('_n') ? THREE.NoColorSpace : THREE.SRGBColorSpace;
+                  if (!t.isKtx) t.minFilter = THREE.LinearMipmapLinearFilter;
+                  out[id] = t;
+                  done++;
+                  onProgress && onProgress(done / total);
+                })
+              );
+            }
+            await Promise.all(jobs);
+            return out;
+          }
+          JSEOF
+          grep -c "ktx2" src/core/assets.js
 
       - name: Install deps + Capacitor
         working-directory: app
@@ -481,7 +566,7 @@ jobs:
           before = after = 0
           for p in sorted(glob.glob(os.path.join(sys.argv[1], '*.webp'))):
               im = Image.open(p); w, h = im.size
-              target = 512 if p.endswith('_n.webp') else 1024
+              target = int(os.environ.get('SF_TEX_NORMAL', '768')) if p.endswith('_n.webp') else int(os.environ.get('SF_TEX_COLOR', '1536'))
               k = min(1.0, target / max(w, h))
               before += w * h
               if k < 1:
@@ -500,9 +585,53 @@ jobs:
           s = open(p, encoding='utf-8').read()
           old = 'dFdx(vCardUv * 2048.0), dv = dFdy(vCardUv * 2048.0)'
           assert s.count(old) == 1, 'grass lod constant not found'
-          open(p, 'w', encoding='utf-8').write(s.replace(old, 'dFdx(vCardUv * 1024.0), dv = dFdy(vCardUv * 1024.0)'))
+          import os
+          px = str(float(min(2048, int(os.environ.get('SF_TEX_COLOR', '1536')))))
+          open(p, 'w', encoding='utf-8').write(s.replace(old, 'dFdx(vCardUv * ' + px + '), dv = dFdy(vCardUv * ' + px + ')'))
           print('grass lod constant updated')
           PYEOF2
+
+      - name: Compress textures to ASTC (KTX2 + mipmaps)
+        working-directory: app
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          mkdir -p ../ktxpkg
+          gh release download --repo KhronosGroup/KTX-Software --pattern '*Darwin-arm64.pkg' --dir ../ktxpkg
+          sudo installer -pkg ../ktxpkg/*.pkg -target /
+          export PATH="/usr/local/bin:$PATH"
+          toktx --version
+          python3 - <<'PYEOF'
+          # .webp (da thu nho o buoc tren) -> .ktx2 ASTC co mipmap. Anh mau: sRGB. Normal map: linear, giu nguyen RGB
+          # (KHONG doi kenh kieu astcenc -normal) de shader hien tai khong phai sua.
+          import glob, os, subprocess, sys
+          from PIL import Image
+          col, nrm, q = os.environ['SF_ASTC_COLOR'], os.environ['SF_ASTC_NORMAL'], os.environ['SF_ASTC_QUALITY']
+          keep = os.environ.get('SF_KEEP_WEBP', '1') == '1'
+          fails, n_ok, webp_px, ktx_bytes = [], 0, 0, 0
+          for p in sorted(glob.glob('public/assets/tex/*.webp')):
+              base = p[:-5]
+              is_n = base.endswith('_n')
+              im = Image.open(p)
+              if im.mode not in ('RGB', 'RGBA'): im = im.convert('RGBA' if 'A' in im.getbands() else 'RGB')
+              tmp = '/tmp/_astc_in.png'
+              im.save(tmp)
+              out = base + '.ktx2'
+              cmd = ['toktx', '--t2', '--encode', 'astc', '--astc_blk_d', nrm if is_n else col, '--astc_quality', q,
+                     '--genmipmap', '--assign_oetf', 'linear' if is_n else 'srgb', '--assign_primaries', 'bt709', out, tmp]
+              r = subprocess.run(cmd, capture_output=True, text=True)
+              if r.returncode != 0 or not os.path.exists(out):
+                  fails.append(os.path.basename(p) + ': ' + (r.stderr or r.stdout)[-300:])
+                  continue
+              n_ok += 1
+              webp_px += im.width * im.height
+              ktx_bytes += os.path.getsize(out)
+              if not keep: os.remove(p)
+          print('ASTC: %d files, %.1f MB on disk (RGBA8 decoded with mips would be %.0f MB)' % (n_ok, ktx_bytes / 1e6, webp_px * 4 * 1.33 / 1e6))
+          if fails:
+              print('ASTC FAILED:\n' + '\n'.join(fails)); sys.exit(1)
+          PYEOF
+          ls public/assets/tex/*.ktx2 | wc -l
 
       - name: Build web
         working-directory: app
