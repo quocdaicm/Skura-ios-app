@@ -10,10 +10,10 @@ permissions:
 
 # Chat luong: tang so neu may con du bo nho GPU, giam neu thay "WebGL context LOST".
 env:
-  SF_TEX_COLOR: '1024'   # canh toi da anh mau (2048 = goc, 1024 = nhe)
-  SF_TEX_NORMAL: '512'   # canh toi da anh normal map
+  SF_TEX_COLOR: '2048'   # canh toi da anh mau (2048 = goc, 1024 = nhe)
+  SF_TEX_NORMAL: '1024'   # canh toi da anh normal map
   SF_DPR: '1.5'          # do phan giai render toi da (1.5 = nhe, 3 = nhu man hinh)
-  SF_MSAA: '2'           # khu rang cua: 0, 2 hoac 4
+  SF_MSAA: '0'           # khu rang cua: 0, 2 hoac 4
   SF_ASTC_COLOR: '6x6'   # nen ASTC cho anh mau (three 0.186 chi ho tro 4x4 hoac 6x6)
   SF_ASTC_NORMAL: '4x4'  # nen ASTC cho normal map (4x4 net hon, 6x6 nhe hon)
   SF_ASTC_QUALITY: 'medium'  # fast / medium / thorough
