@@ -599,7 +599,7 @@ jobs:
           mkdir -p ../ktxpkg
           gh release download --repo KhronosGroup/KTX-Software --pattern '*Darwin-arm64.pkg' --dir ../ktxpkg
           sudo installer -pkg ../ktxpkg/*.pkg -target /
-          export PATH="/usr/local/bin:$PATH"
+          export PATH="$PATH:/usr/local/bin"   # cuoi PATH: khong de /usr/local/bin che python3 co Pillow
           toktx --version
           python3 - <<'PYEOF'
           # .webp (da thu nho o buoc tren) -> .ktx2 ASTC co mipmap. Anh mau: sRGB. Normal map: linear, giu nguyen RGB
