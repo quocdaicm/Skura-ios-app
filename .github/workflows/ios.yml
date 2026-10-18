@@ -1,0 +1,232 @@
+name: Build iOS IPA (unsigned)
+
+# Nguon: sakura-part*.zip trong repo (uu tien) > zip trong Release tag "source" > clone ban goc.
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: macos-15
+    timeout-minutes: 90
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Get source (sakura-part*.zip in repo > zip in Release "source" > upstream)
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          if ls sakura-part*.zip >/dev/null 2>&1; then
+            echo "Using sakura-part*.zip from repo"
+            mkdir -p app
+            for z in sakura-part*.zip; do echo "unzip $z"; unzip -q -o "$z" -d app; done
+          else
+            mkdir -p dl
+            if gh release download source --repo "${{ github.repository }}" --pattern '*.zip' --dir dl 2>/dev/null && ls dl/*.zip >/dev/null 2>&1; then
+              echo "Using zip from Release"
+              mkdir -p unz
+              unzip -q dl/*.zip -d unz
+              top="$(ls -d unz/*/ 2>/dev/null | head -1)"
+              if [ -n "$top" ] && [ "$(ls unz | wc -l | tr -d ' ')" = "1" ]; then mv "$top" app; else mv unz app; fi
+            else
+              echo "No parts and no Release zip -> cloning upstream"
+              git clone --depth 1 https://github.com/billpwchan/sakura-fantasy.git app
+            fi
+          fi
+          test -f app/package.json || { echo "package.json not found in app/"; ls -la app; exit 1; }
+          ls app
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: Add mobile files (touch controls, iOS audio fix, Capacitor config)
+        working-directory: app
+        run: |
+          mkdir -p src/ui
+          cat > src/ui/touch.js <<'JSEOF'
+          // Floating virtual joystick (FPS-style) on the left side of the screen.
+          // Drag the thumb: left/right = steer the boat, up = speed up, down = slow down.
+          // The rest of the screen still rotates the camera (swipe) and zooms (pinch).
+          // It sends the same A/D/W/S key events the game already listens to. Hidden on mouse devices.
+          if (window.matchMedia('(pointer: coarse)').matches) {
+            const R = 60;          // joystick radius (px)
+            const DEAD = 0.3;      // dead zone (0..1)
+
+            const css = document.createElement('style');
+            css.textContent = `
+              #joyzone { position: fixed; left: 0; bottom: 0; width: 38vw; height: 72vh; z-index: 2;
+                         touch-action: none; user-select: none; -webkit-user-select: none; }
+              #joybase { position: fixed; z-index: 2; width: ${R * 2}px; height: ${R * 2}px; border-radius: 50%;
+                         border: 2px solid rgba(255,243,234,.35); background: rgba(11,10,13,.28);
+                         backdrop-filter: blur(4px); -webkit-backdrop-filter: blur(4px);
+                         opacity: .55; pointer-events: none; transition: opacity .2s; }
+              #joybase.on { opacity: 1; }
+              #joystick { position: absolute; left: 50%; top: 50%; width: 56px; height: 56px; margin: -28px 0 0 -28px;
+                          border-radius: 50%; background: rgba(255,243,234,.55); border: 1px solid rgba(255,243,234,.9); }
+              #joybase.on #joystick { background: rgba(200,64,42,.8); }
+            `;
+            document.head.appendChild(css);
+
+            const zone = document.createElement('div'); zone.id = 'joyzone';
+            const base = document.createElement('div'); base.id = 'joybase';
+            const stick = document.createElement('div'); stick.id = 'joystick';
+            base.appendChild(stick);
+            document.body.append(zone, base);
+
+            const home = () => ({
+              x: Math.max(R + 28, 0) + (parseInt(getComputedStyle(document.documentElement).getPropertyValue('--sal')) || 0) + 30,
+              y: window.innerHeight - R - 34,
+            });
+            const place = (cx, cy) => { base.style.left = cx - R + 'px'; base.style.top = cy - R + 'px'; };
+            const reset = () => { const h = home(); place(h.x, h.y); stick.style.transform = ''; };
+            reset();
+            window.addEventListener('resize', () => { if (!active) reset(); });
+
+            const down = new Set();
+            const key = (code, on) => {
+              if (on === down.has(code)) return;
+              on ? down.add(code) : down.delete(code);
+              window.dispatchEvent(new KeyboardEvent(on ? 'keydown' : 'keyup', { code, bubbles: true }));
+            };
+            const release = () => ['KeyA', 'KeyD', 'KeyW', 'KeyS'].forEach((c) => key(c, false));
+
+            let active = null, cx = 0, cy = 0;
+
+            zone.addEventListener('pointerdown', (e) => {
+              if (active !== null) return;
+              active = e.pointerId;
+              zone.setPointerCapture(e.pointerId);
+              cx = Math.min(Math.max(e.clientX, R + 10), window.innerWidth * 0.38 - 10);
+              cy = Math.min(e.clientY, window.innerHeight - R - 10);
+              place(cx, cy);
+              base.classList.add('on');
+              move(e);
+            });
+
+            function move(e) {
+              let dx = e.clientX - cx, dy = e.clientY - cy;
+              const d = Math.hypot(dx, dy);
+              if (d > R) { dx *= R / d; dy *= R / d; }
+              stick.style.transform = `translate(${dx}px, ${dy}px)`;
+              const nx = dx / R, ny = dy / R;
+              key('KeyD', nx > DEAD);
+              key('KeyA', nx < -DEAD);
+              key('KeyS', ny > DEAD);
+              key('KeyW', ny < -DEAD);
+            }
+
+            zone.addEventListener('pointermove', (e) => { if (e.pointerId === active) move(e); });
+            const end = (e) => {
+              if (e.pointerId !== active) return;
+              active = null;
+              base.classList.remove('on');
+              release();
+              reset();
+            };
+            zone.addEventListener('pointerup', end);
+            zone.addEventListener('pointercancel', end);
+            zone.addEventListener('contextmenu', (e) => e.preventDefault());
+          }
+
+          JSEOF
+          cat > src/ui/ios-audio.js <<'JSEOF'
+          // iOS: Web Audio is muted when the phone's silent switch is on, unless the page is also playing an
+          // <audio> element. Looping an inaudible clip switches the audio session to "playback" so the music plays.
+          (() => {
+            const rate = 8000, n = rate; // 1 second of silence, 8-bit mono
+            const buf = new ArrayBuffer(44 + n), v = new DataView(buf);
+            const w = (o, s) => { for (let i = 0; i < s.length; i++) v.setUint8(o + i, s.charCodeAt(i)); };
+            w(0, 'RIFF'); v.setUint32(4, 36 + n, true); w(8, 'WAVE'); w(12, 'fmt ');
+            v.setUint32(16, 16, true); v.setUint16(20, 1, true); v.setUint16(22, 1, true);
+            v.setUint32(24, rate, true); v.setUint32(28, rate, true); v.setUint16(32, 1, true); v.setUint16(34, 8, true);
+            w(36, 'data'); v.setUint32(40, n, true);
+            new Uint8Array(buf, 44).fill(128);
+            const a = new Audio(URL.createObjectURL(new Blob([buf], { type: 'audio/wav' })));
+            a.loop = true; a.volume = 0.01; a.setAttribute('playsinline', '');
+            const go = () => { a.play().catch(() => {}); };
+            ['pointerdown', 'touchend', 'click', 'keydown'].forEach((t) =>
+              window.addEventListener(t, go, { once: true, passive: true }));
+            document.addEventListener('visibilitychange', () => { if (!document.hidden) go(); });
+          })();
+
+          JSEOF
+          cat > capacitor.config.json <<'JSEOF'
+          {
+            "appId": "com.example.sakurafantasy",
+            "appName": "Sakura Fantasy",
+            "webDir": "dist",
+            "ios": {
+              "contentInset": "never",
+              "backgroundColor": "#0b0a0d"
+            }
+          }
+
+          JSEOF
+          grep -q "ui/touch.js" src/main.js || sed -i "1i import './ui/touch.js';" src/main.js
+          grep -q "ui/ios-audio.js" src/main.js || sed -i "1i import './ui/ios-audio.js';" src/main.js
+          head -3 src/main.js
+
+      - name: Install deps + Capacitor
+        working-directory: app
+        run: |
+          npm ci
+          npm i --no-save @capacitor/core@7 @capacitor/cli@7 @capacitor/ios@7
+
+      - name: Drop desktop-only hi-res models (phones use the quick tier)
+        working-directory: app
+        run: rm -rf public/assets/models/hi
+
+      - name: Build web
+        working-directory: app
+        run: npm run build
+
+      - name: Create iOS project
+        working-directory: app
+        run: |
+          npx cap add ios
+          npx cap sync ios
+
+      - name: Configure Info.plist (landscape, fullscreen)
+        working-directory: app
+        run: |
+          P=ios/App/App/Info.plist
+          PB=/usr/libexec/PlistBuddy
+          $PB -c "Delete :UISupportedInterfaceOrientations" $P || true
+          $PB -c "Add :UISupportedInterfaceOrientations array" $P
+          $PB -c "Add :UISupportedInterfaceOrientations:0 string UIInterfaceOrientationLandscapeLeft" $P
+          $PB -c "Add :UISupportedInterfaceOrientations:1 string UIInterfaceOrientationLandscapeRight" $P
+          $PB -c "Delete :UISupportedInterfaceOrientations~ipad" $P || true
+          $PB -c "Add :UISupportedInterfaceOrientations~ipad array" $P
+          $PB -c "Add :UISupportedInterfaceOrientations~ipad:0 string UIInterfaceOrientationLandscapeLeft" $P
+          $PB -c "Add :UISupportedInterfaceOrientations~ipad:1 string UIInterfaceOrientationLandscapeRight" $P
+          $PB -c "Add :UIStatusBarHidden bool true" $P || $PB -c "Set :UIStatusBarHidden true" $P
+          $PB -c "Set :UIViewControllerBasedStatusBarAppearance false" $P || $PB -c "Add :UIViewControllerBasedStatusBarAppearance bool false" $P
+          $PB -c "Add :ITSAppUsesNonExemptEncryption bool false" $P || true
+
+      - name: Archive (no code signing)
+        working-directory: app
+        run: |
+          xcodebuild -workspace ios/App/App.xcworkspace \
+            -scheme App -configuration Release -sdk iphoneos -destination 'generic/platform=iOS' \
+            -archivePath build/App.xcarchive \
+            CODE_SIGNING_ALLOWED=NO CODE_SIGNING_REQUIRED=NO CODE_SIGN_IDENTITY="" \
+            archive
+
+      - name: Package IPA
+        working-directory: app
+        run: |
+          mkdir -p Payload
+          cp -R build/App.xcarchive/Products/Applications/App.app Payload/
+          zip -qr SakuraFantasy.ipa Payload
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: SakuraFantasy-ipa
+          path: app/SakuraFantasy.ipa
